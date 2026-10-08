@@ -179,6 +179,15 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
 .sp-fix ins{color:var(--primary);text-decoration:none}
 .sp-note{font-size:11px;color:var(--muted);margin-top:3px}
 .sp .btn-ghost{height:32px;padding:0 14px;font-size:11.5px}
+.spg{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:8px}
+.spg-rows{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.spr{display:flex;align-items:center;gap:8px;padding:6px 6px 6px 10px;border-radius:10px;background:var(--side)}
+.spr-c{flex:1;min-width:0;font-size:12px;color:var(--ink2);line-height:1.55;word-break:break-all;white-space:pre-wrap}
+.spr-c del{color:var(--danger);text-decoration-thickness:1.5px}
+.spr-c ins{color:var(--primary);text-decoration:none;font-weight:600}
+.spr .btn-ghost{height:28px;padding:0 12px;font-size:11px;flex:none}
+.spr-more{font-size:11px;color:var(--muted);padding:2px 4px}
+.spg-f{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
 .okbox{display:flex;align-items:center;gap:10px;padding:18px;border-radius:14px;background:#effaf3;color:#1f7a45;font-weight:500}
 .out{margin-top:14px}
 .out .in{font-size:11px}
@@ -596,7 +605,7 @@ function syncUI() {
   bl.title = m && m.lock ? '비밀번호 변경·해제' : '비밀번호 설정';
   bl.disabled = !!(m && m.lock && !ok);
   $('#btnShare').disabled = !ok; $('#btnSave').disabled = !ok;
-  $$('.chip, .fbtn').forEach(b => b.disabled = !ok);
+  $$('.chip, .fbtn').forEach(b => b.disabled = b.id === 'chClip' ? false : !ok);   // 클립보드는 잠긴 메모에서도 열림
   updateFoot();
 }
 
@@ -798,7 +807,7 @@ function clipAct(act, b) {
   }
   const el = b.closest('.clip'); if (!el) return;
   const c = clips.find(x => x.id === el.dataset.id); if (!c) return;
-  if (act === 'paste') { insertText(c.text); if (isMobile()) closeSheet(); }
+  if (act === 'paste') { if (!editable()) { toast('먼저 잠금을 풀어주세요'); return; } insertText(c.text); if (isMobile()) closeSheet(); }
   else if (act === 'copy') copyText(c.text).then(ok => toast(ok ? '복사했어요' : '복사하지 못했어요'));
   else if (act === 'pin') { c.pin = !c.pin; let n = 0; clips = clips.filter(x => x.pin || ++n <= MAX_CLIPS); store.set(K.clips, clips); renderClips(); renderList(); }
   else if (act === 'del') { clips = clips.filter(x => x !== c); store.set(K.clips, clips); renderClips(); renderList(); }
@@ -891,64 +900,193 @@ function replaceAct(act) {
   $('#rpWith').value = t;
 }
 
-/* ================= spell check (rule based) ================= */
-const RULES = [
+/* ================= spell check (rule based, 한국어) ================= */
+const jongOf = ch => { const c = String(ch || '').charCodeAt(0) - 0xAC00; return c >= 0 && c < 11172 ? c % 28 : -1; };   // 받침 번호 (0=없음, 4=ㄴ, 8=ㄹ)
+const josaGa = w => (jongOf(w.slice(-1)) > 0 ? '이' : '가');
+const RULES = [];
+const lit = (cat, rows) => rows.forEach(([from, to, note]) => RULES.push({
+  cat, from, to, note: note || `"${to}"${josaGa(to)} 맞아요`,
+  re: new RegExp(escRe(from), 'g'), fix: () => to
+}));
+const rx = (cat, label, note, re, fix) => RULES.push({ cat, label, note, re, fix });
+
+/* 앞쪽 규칙이 우선해요 (같은 자리에 겹치면 먼저 나온 규칙만 적용) */
+lit('맞춤법', [
+  ['안되요','안 돼요','"안"은 띄어 쓰고, "되어요"의 준말은 "돼요"예요'],
+  ['안되서','안 돼서','"안"은 띄어 쓰고, "되어서"의 준말은 "돼서"예요'],
+  ['않되','안 되','부정은 "안"을 써요'], ['않돼','안 돼','부정은 "안"을 써요'],
+  ['않해','안 해','부정은 "안"을 써요'], ['않했','안 했','부정은 "안"을 써요'],
+  ['안돼','안 돼','"안"은 띄어 써요'],
   ['몇일','며칠','"며칠"이 표준어예요'], ['몇 일','며칠','"며칠"은 붙여 써요'],
   ['되요','돼요','"되어요"의 준말은 "돼요"예요'], ['되서','돼서','"되어서"의 준말은 "돼서"예요'],
-  ['됬','됐','"되었"의 준말은 "됐"이에요'], ['안돼','안 돼','"안"은 띄어 써요'], ['않되','안 되','부정은 "안"을 써요'],
+  ['되야','돼야','"되어야"의 준말은 "돼야"예요'], ['됬','됐','"되었"의 준말은 "됐"이에요'],
   ['웬지','왠지','"왜인지"의 준말은 "왠지"예요'], ['왠만','웬만','"웬만하다"가 맞아요'], ['왠일','웬일','"웬일"이 맞아요'],
-  ['어떻해','어떡해','"어떻게 해"의 준말은 "어떡해"예요'], ['어떻하','어떡하','"어떡하"가 맞아요'],
-  ['금새','금세','"금세"가 맞아요'], ['설레임','설렘','"설렘"이 맞아요'], ['희안','희한','"희한하다"가 맞아요'],
-  ['오랫만','오랜만','"오랜만"이 맞아요'], ['오랜동안','오랫동안','"오랫동안"이 맞아요'], ['역활','역할','"역할"이 맞아요'],
-  ['어의없','어이없','"어이없다"가 맞아요'], ['어줍잖','어쭙잖','"어쭙잖다"가 맞아요'], ['일일히','일일이','"일일이"가 맞아요'],
-  ['갯수','개수','"개수"가 맞아요'], ['곰곰히','곰곰이','"곰곰이"가 맞아요'], ['깨끗히','깨끗이','"깨끗이"가 맞아요'],
-  ['꼼꼼이','꼼꼼히','"꼼꼼히"가 맞아요'], ['무릎쓰','무릅쓰','"무릅쓰다"가 맞아요'], ['뵈요','봬요','"뵈어요"의 준말은 "봬요"예요'],
-  ['바램','바람','소망의 뜻은 "바람"이에요'], ['눈꼽','눈곱','"눈곱"이 맞아요'], ['핑게','핑계','"핑계"가 맞아요'],
+  ['어떻해','어떡해','"어떻게 해"의 준말은 "어떡해"예요'], ['어떻하','어떡하','"어떡하"가 맞아요'], ['어떡게','어떻게','"어떻게"가 맞아요'],
+  ['뵈요','봬요','"뵈어요"의 준말은 "봬요"예요'], ['바램','바람','소망의 뜻은 "바람"이에요'],
+  ['금새','금세'], ['설레임','설렘'], ['희안','희한','"희한하다"가 맞아요'], ['오랫만','오랜만'], ['오랜동안','오랫동안'],
+  ['역활','역할'], ['어의없','어이없','"어이없다"가 맞아요'], ['어줍잖','어쭙잖','"어쭙잖다"가 맞아요'],
+  ['갯수','개수'], ['무릎쓰','무릅쓰','"무릅쓰다"가 맞아요'], ['눈꼽','눈곱'], ['핑게','핑계'],
   ['치뤄','치러','"치르다"의 활용은 "치러"예요'], ['치루','치르','"치르다"가 맞아요'],
-  ['세째','셋째','"셋째"가 맞아요'], ['네째','넷째','"넷째"가 맞아요'], ['뒷처리','뒤처리','"뒤처리"가 맞아요'], ['윗층','위층','"위층"이 맞아요'],
-  ['담궈','담가','"담그다"의 활용은 "담가"예요'], ['잠궈','잠가','"잠그다"의 활용은 "잠가"예요'], ['잠궜','잠갔','"잠갔"이 맞아요'],
-  ['찌게','찌개','"찌개"가 맞아요'], ['육계장','육개장','"육개장"이 맞아요'], ['떡볶기','떡볶이','"떡볶이"가 맞아요'],
-  ['생각컨대','생각건대','"생각건대"가 맞아요'], ['사겼','사귀었','"사귀었"이 맞아요'],
-  ['아니예요','아니에요','"아니에요"가 맞아요'], ['이예요','이에요','받침 뒤에는 "이에요"를 써요'],
-  ['할께','할게','"-ㄹ게"가 맞아요'], ['갈께','갈게','"-ㄹ게"가 맞아요'], ['볼께','볼게','"-ㄹ게"가 맞아요'], ['줄께','줄게','"-ㄹ게"가 맞아요'], ['올께','올게','"-ㄹ게"가 맞아요'],
-  ['수 밖에','수밖에','"수밖에"는 붙여 써요'], ['수있','수 있','"수"는 띄어 써요'], ['수없','수 없','"수"는 띄어 써요'],
-  ['것같','것 같','"것"과 "같다"는 띄어 써요'],
-  ['할때','할 때','"때"는 띄어 써요'], ['했을때','했을 때','"때"는 띄어 써요'], ['있을때','있을 때','"때"는 띄어 써요'], ['그럴때','그럴 때','"때"는 띄어 써요']
-].map(([from, to, note]) => ({ from, to, note, rep: to, re: new RegExp(escRe(from), 'g') }));
-RULES.push({ from: '연속 공백', to: '공백 한 칸', note: '공백이 두 칸 이상 이어졌어요', rep: ' ', re: /[ \u00a0]{2,}/g });
+  ['세째','셋째'], ['네째','넷째'], ['뒷처리','뒤처리'], ['윗층','위층'],
+  ['담궈','담가','"담그다"의 활용은 "담가"예요'], ['잠궈','잠가','"잠그다"의 활용은 "잠가"예요'], ['잠궜','잠갔'],
+  ['찌게','찌개'], ['육계장','육개장'], ['떡볶기','떡볶이'], ['생각컨대','생각건대'],
+  ['사겼','사귀었'], ['사겨','사귀어','"사귀다"의 활용은 "사귀어"예요'],
+  ['아니예요','아니에요'],
+  ['설겆이','설거지'], ['돌맹이','돌멩이'], ['짜집기','짜깁기'], ['곱배기','곱빼기'], ['쓰래기','쓰레기'], ['배개','베개'],
+  ['재털이','재떨이'], ['움추','움츠','"움츠리다"가 맞아요'], ['널부러','널브러'], ['뒤쳐','뒤처','"뒤처지다"가 맞아요'],
+  ['명예회손','명예훼손'], ['삼가해','삼가','"삼가다"는 "삼가"로 활용해요'], ['으례','으레'],
+  ['더우기','더욱이'], ['일찌기','일찍이'], ['구지','굳이'], ['저희나라','우리나라','"우리나라"가 맞아요'],
+  ['알맞는','알맞은','"알맞다"는 형용사라 "알맞은"이에요'], ['걸맞는','걸맞은','"걸맞다"는 형용사라 "걸맞은"이에요'],
+  ['그렇치','그렇지'], ['이렇치','이렇지'], ['저렇치','저렇지'], ['그렇찮','그렇잖','"그렇지 않"의 준말은 "그렇잖"이에요'],
+  ['괜찬','괜찮'], ['귀찬','귀찮'], ['어쨋','어쨌'],
+  ['있슴','있음'], ['없슴','없음'], ['했슴','했음'],
+  ['했엇','했었'], ['있엇','있었'], ['없엇','없었'], ['갔엇','갔었'], ['왔엇','왔었'], ['봤엇','봤었'],
+  ['답을 맞추','답을 맞히','정답은 "맞히다"를 써요'], ['문제를 맞추','문제를 맞히','정답은 "맞히다"를 써요'],
+  ['넉넉치','넉넉지','"넉넉하지"의 준말은 "넉넉지"예요'], ['깨끗치','깨끗지','"깨끗하지"의 준말은 "깨끗지"예요'],
+  ['섭섭치','섭섭지','"섭섭하지"의 준말은 "섭섭지"예요'], ['익숙치','익숙지','"익숙하지"의 준말은 "익숙지"예요'],
+  ['뭐에요','뭐예요','받침이 없으면 "예요"를 써요'], ['누구에요','누구예요','받침이 없으면 "예요"를 써요'],
+  ['어디에요','어디예요','받침이 없으면 "예요"를 써요'], ['여기에요','여기예요','받침이 없으면 "예요"를 써요'],
+  ['저기에요','저기예요','받침이 없으면 "예요"를 써요'], ['거기에요','거기예요','받침이 없으면 "예요"를 써요']
+]);
+/* -히 / -이 */
+lit('맞춤법', [
+  ['일일히','일일이'], ['곰곰히','곰곰이'], ['깨끗히','깨끗이'], ['꼼꼼이','꼼꼼히'],
+  ['틈틈히','틈틈이'], ['간간히','간간이'], ['번번히','번번이'], ['샅샅히','샅샅이'], ['곳곳히','곳곳이'], ['겹겹히','겹겹이'],
+  ['깊숙히','깊숙이'], ['나날히','나날이'],
+  ['솔직이','솔직히'], ['꾸준이','꾸준히'], ['열심이','열심히'], ['조용이','조용히'], ['분명이','분명히'], ['간단이','간단히'],
+  ['정확이','정확히'], ['특별이','특별히'], ['당당이','당당히'], ['가만이','가만히'], ['나란이','나란히'],
+  ['충분이','충분히'], ['확실이','확실히'], ['고스란이','고스란히']
+]);
 
-function runSpell() {
-  const found = [];
-  RULES.forEach((r, i) => { let c = 0; walkText(n => { const m = n.nodeValue.match(r.re); if (m) c += m.length; }); if (c) found.push({ i, c }); });
-  return found;
+/* 받침·문맥을 보고 판단하는 규칙 */
+rx('맞춤법', '"-ㄹ게" (-ㄹ께 ✕)', '"-ㄹ게"는 "게"로 써요', /([가-힣])께/g,
+  m => (jongOf(m[1]) === 8 ? m[1] + '게' : m[0]));
+rx('맞춤법', '"-ㄹ 거야" (-ㄹ꺼 ✕)', '"것"의 구어체는 "거"로 써요',
+  /([가-힣])꺼(야|예요|에요|다|임|라|면|지|잖아|같|니까|죠|인데|인가|(?![가-힣]))/g,
+  m => (jongOf(m[1]) !== 8 || m[1] === '불' ? m[0] : `${m[1]} 거${m[2] === '에요' ? '예요' : m[2]}`));
+rx('맞춤법', '"-려고" (-ㄹ려고 ✕)', '"-(으)려고"가 맞아요', /(할|볼|될|먹을|입을|읽을|받을|찾을|있을|없을|잡을)려(고|면|는|구|던)/g, m => {
+  const stem = { '할': '하', '볼': '보', '될': '되', '먹을': '먹으', '입을': '입으', '읽을': '읽으', '받을': '받으', '찾을': '찾으', '있을': '있으', '없을': '없으', '잡을': '잡으' }[m[1]];
+  return stem + '려' + (m[2] === '구' ? '고' : m[2]);
+});
+const NOUN_I = new Set(['고양이','아이','나이','길이','높이','놀이','깊이','넓이','사이']);   // 낱말 자체가 "이"로 끝나는 말
+rx('맞춤법', '"-이에요" (-이예요 ✕)', '받침 뒤에는 "이에요"를 써요', /([가-힣]{0,3})이예요/g, m => {
+  const w = m[1] + '이';
+  for (let n = 2; n <= w.length; n++) if (NOUN_I.has(w.slice(-n))) return m[0];
+  return m[1] + '이에요';
+});
+
+/* 띄어쓰기 */
+rx('띄어쓰기', '"몇" 뒤 단위', '"몇"과 단위는 띄어 써요', /몇(개|명|번|시|달|년|분|살|주|월|가지|사람|층|군데|마리|권|장|대)/g, m => '몇 ' + m[1]);
+rx('띄어쓰기', '"할 수 있다" 띄어쓰기', '"수"는 앞뒤를 띄어 써요', /([가-힣])( ?)수(도?)( ?)(있|없)/g,
+  m => (jongOf(m[1]) === 8 ? `${m[1]} 수${m[3]} ${m[5]}` : m[0]));
+rx('띄어쓰기', '"할 수밖에" 띄어쓰기', '"수밖에"는 붙여 쓰고, 앞말과는 띄어 써요', /([가-힣])( ?)수( ?)밖에/g,
+  m => (jongOf(m[1]) === 8 ? `${m[1]} 수밖에` : m[0]));
+lit('띄어쓰기', [['수 밖에','수밖에','"수밖에"는 붙여 써요']]);
+rx('띄어쓰기', '"할 때" 띄어쓰기', '"때"는 앞말과 띄어 써요', /([가-힣])때/g, m => {
+  if (m[0] === '물때') return m[0];                                  // 한 낱말
+  return (jongOf(m[1]) === 8 || m[1] === '는' || m[1] === '던') ? `${m[1]} 때` : m[0];
+});
+rx('띄어쓰기', '"할 거 같다" 띄어쓰기', '"거"와 "같다"는 띄어 써요', /([가-힣])( ?)거( ?)같/g, m => {
+  const j = jongOf(m[1]);
+  return ((j === 8 || j === 4) && m[1] !== '선') ? `${m[1]} 거 같` : m[0];
+});
+rx('띄어쓰기', '"할 거야" 띄어쓰기', '"거"는 앞말과 띄어 써요', /([가-힣])거(야|예요|에요|죠|니까)/g,
+  m => (jongOf(m[1]) === 8 && '철발설'.indexOf(m[1]) < 0 ? `${m[1]} 거${m[2] === '에요' ? '예요' : m[2]}` : m[0]));
+lit('띄어쓰기', [
+  ['거에요','거예요','"것이에요"의 준말은 "거예요"예요'],
+  ['것같','것 같','"것"과 "같다"는 띄어 써요'],
+  ['고있','고 있','"-고 있다"는 띄어 써요'], ['고싶','고 싶','"-고 싶다"는 띄어 써요'],
+  ['되어있','되어 있','보조 용언은 띄어 써요'], ['되있','돼 있','"되어 있"의 준말은 "돼 있"이에요']
+]);
+rx('띄어쓰기', '"해야 돼" 띄어쓰기', '"-어야"와 "되다"는 띄어 써요', /([가-힣])야(되|돼)/g, m => (jongOf(m[1]) === 0 ? `${m[1]}야 ${m[2]}` : m[0]));
+rx('띄어쓰기', '"하지 않" (안 ✕)', '"-지" 뒤의 부정은 "않"을 써요', /지( ?)안(았|는|아|으|은|을|고|다|습|네)/g, m => '지 않' + m[2]);
+
+/* 문장부호·공백 */
+rx('문장부호', '쉼표·마침표 앞 공백', '쉼표나 마침표 앞에는 공백을 두지 않아요', /([가-힣])[ \u00a0]+([,.?!])(?![.?!,])/g, m => m[1] + m[2]);
+rx('문장부호', '쉼표·마침표 뒤 공백', '쉼표나 마침표 뒤에는 한 칸 띄어 써요', /([가-힣])([,.?!])([가-힣])/g, m => `${m[1]}${m[2]} ${m[3]}`);
+rx('공백', '연속 공백', '공백이 두 칸 이상 이어졌어요', /[ \u00a0]{2,}/g, () => ' ');
+
+let spellOcc = [];                 // 마지막 검사에서 찾은 곳 (화면에 보이는 목록의 근거)
+const spellIgnore = new Set();     // 이번에 열어 둔 동안 "무시"한 규칙
+function scanSpell() {
+  const out = [];
+  walkText(node => {
+    const v = node.nodeValue; if (!v) return;
+    const taken = [], here = [];
+    RULES.forEach((r, ri) => {
+      r.re.lastIndex = 0; let m;
+      while ((m = r.re.exec(v))) {
+        if (!m[0]) { r.re.lastIndex++; continue; }
+        const s = m.index, e = s + m[0].length, to = r.fix(m);
+        if (to === m[0] || taken.some(t => s < t[1] && e > t[0])) continue;
+        taken.push([s, e]);
+        here.push({ r: ri, node, start: s, found: m[0], fixed: to, pre: (s > 10 ? '…' : '') + v.slice(Math.max(0, s - 10), s), post: v.slice(e, e + 10) + (e + 10 < v.length ? '…' : '') });
+      }
+    });
+    here.sort((a, b) => a.start - b.start).forEach(o => out.push(o));
+  });
+  out.forEach((o, i) => { o.id = i; });
+  spellOcc = out;
+  return out;
 }
-function applyRule(r) {
-  let c = 0;
-  walkText(n => { const v = n.nodeValue, nv = v.replace(r.re, () => { c++; return r.rep; }); if (nv !== v) n.nodeValue = nv; });
+function applyOccs(list) {
+  const byNode = new Map(); let c = 0;
+  list.forEach(o => { if (!byNode.has(o.node)) byNode.set(o.node, []); byNode.get(o.node).push(o); });
+  byNode.forEach((arr, node) => {
+    if (!node.isConnected) return;
+    let v = node.nodeValue;
+    arr.sort((a, b) => b.start - a.start).forEach(o => {            // 뒤에서부터 바꿔야 앞쪽 위치가 안 밀려요
+      if (v.substr(o.start, o.found.length) === o.found) { v = v.slice(0, o.start) + o.fixed + v.slice(o.start + o.found.length); c++; }
+    });
+    if (v !== node.nodeValue) node.nodeValue = v;
+  });
   return c;
 }
+const spTxt = s => (/^[ \u00a0]+$/.test(s) ? `공백 ${s.length}칸` : esc(s));
 function renderSpell() {
-  const found = runSpell(), total = found.reduce((s, f) => s + f.c, 0);
+  const all = scanSpell(), occ = all.filter(o => !spellIgnore.has(o.r));
+  const hidden = new Set(all.filter(o => spellIgnore.has(o.r)).map(o => o.r)).size;
+  const groups = new Map();
+  occ.forEach(o => { if (!groups.has(o.r)) groups.set(o.r, []); groups.get(o.r).push(o); });
+  const MAXROW = 5;
+  const row = o => `
+    <div class="spr"><div class="spr-c">${esc(o.pre)}<del>${spTxt(o.found)}</del> → <ins>${spTxt(o.fixed)}</ins>${esc(o.post)}</div>
+      <button class="btn-ghost" data-act="fixone" data-o="${o.id}">고치기</button></div>`;
+  const group = ([ri, list]) => { const r = RULES[ri]; return `
+    <div class="spg">
+      <div class="sp-fix">${r.label ? esc(r.label) : `<del>${esc(r.from)}</del> → <ins>${esc(r.to)}</ins>`} <span class="nokey">${r.cat} · ${list.length}곳</span></div>
+      <div class="sp-note">${esc(r.note)}</div>
+      <div class="spg-rows">${list.slice(0, MAXROW).map(row).join('')}${list.length > MAXROW ? `<div class="spr-more">외 ${list.length - MAXROW}곳</div>` : ''}</div>
+      <div class="spg-f"><button class="link" data-act="ignore" data-k="${ri}">이 항목 무시</button>${list.length > 1 ? `<button class="link" data-act="fixrule" data-k="${ri}">${list.length}곳 모두 고치기</button>` : '<span></span>'}</div>
+    </div>`; };
   sheetBody.innerHTML = `
-    <p class="hint">자주 틀리는 맞춤법과 띄어쓰기를 규칙으로 찾아요. 간단한 검사라 모든 오류를 잡지는 못하고, 문맥상 맞는 표현이 걸릴 수도 있어요.</p>
+    <p class="hint">자주 틀리는 맞춤법·띄어쓰기·문장부호를 규칙으로 찾아 앞뒤 문맥과 함께 보여줘요. 간단한 규칙 검사라 모든 오류를 잡지는 못하고, 문맥상 맞는 표현이 걸릴 수도 있으니 확인하고 고쳐 주세요.</p>
     <button class="btn-ghost block" data-act="rescan" style="margin-top:0">${ic('spell')}다시 검사</button>
-    ${found.length ? `
-      <div class="sec"><span>${found.length}종류 · ${total}곳</span>${found.length > 1 ? '<button class="link" data-act="fixall">모두 고치기</button>' : ''}</div>
-      ${found.map(f => { const r = RULES[f.i]; return `
-        <div class="sp"><div class="sp-main">
-          <div class="sp-fix"><del>${esc(r.from)}</del> → <ins>${esc(r.to)}</ins> <span class="nokey">${f.c}곳</span></div>
-          <div class="sp-note">${esc(r.note)}</div></div>
-          <button class="btn-ghost" data-act="fix" data-k="${f.i}">고치기</button></div>`; }).join('')}`
+    ${occ.length ? `
+      <div class="sec"><span>${groups.size}종류 · ${occ.length}곳</span>${occ.length > 1 ? '<button class="link" data-act="fixall">모두 고치기</button>' : ''}</div>
+      ${[...groups].map(group).join('')}`
     : `<div class="okbox" style="margin-top:16px">${ic('check')}<div>발견된 오류가 없어요</div></div>`}
+    ${hidden ? `<button class="link" data-act="unignore" style="margin-top:6px">무시한 ${hidden}종류 다시 보기</button>` : ''}
     <button class="btn-ghost block" data-act="undo" ${undoSnap == null ? 'hidden' : ''}>되돌리기</button>`;
+}
+function spellDone(c) {
+  if (c) { scheduleSave(); toast(c + '곳을 고쳤어요'); } else toast('이미 바뀐 내용이에요');
+  renderSpell();
 }
 function spellAct(act, b) {
   if (act === 'rescan') { renderSpell(); return; }
   if (act === 'undo') { undo(); return; }
-  if (act === 'fix') { snap(); const c = applyRule(RULES[+b.dataset.k]); scheduleSave(); toast(c + '곳을 고쳤어요'); renderSpell(); return; }
+  if (act === 'ignore') { spellIgnore.add(+b.dataset.k); renderSpell(); return; }
+  if (act === 'unignore') { spellIgnore.clear(); renderSpell(); return; }
+  if (act === 'fixone') { const o = spellOcc[+b.dataset.o]; if (!o) return; snap(); spellDone(applyOccs([o])); return; }
+  if (act === 'fixrule') { const k = +b.dataset.k; snap(); spellDone(applyOccs(spellOcc.filter(o => o.r === k))); return; }
   if (act === 'fixall') {
-    snap(); let c = 0; runSpell().forEach(f => { c += applyRule(RULES[f.i]); });
-    scheduleSave(); toast(c + '곳을 고쳤어요'); renderSpell();
+    snap(); let c = 0;
+    for (let pass = 0; pass < 3; pass++) {                            // 고친 결과에서 새로 걸리는 것까지 몇 번 더 확인
+      const list = scanSpell().filter(o => !spellIgnore.has(o.r)); if (!list.length) break;
+      const n = applyOccs(list); c += n; if (!n) break;
+    }
+    spellDone(c);
   }
 }
 
