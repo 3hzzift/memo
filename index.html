@@ -1193,15 +1193,70 @@ $('#lsBtn').addEventListener('click', unlockCurrent);
 $('#lsInput').addEventListener('keydown', e => { if (e.key === 'Enter') unlockCurrent(); });
 
 /* ================= share ================= */
-async function buildLink(m, pw) {
-  let data = enc.encode(JSON.stringify({ t: titleEl.value, h: sanitize(bodyEl.innerHTML) })), flags = 0;
-  const z = await deflate(data); if (z && z.length < data.length) { data = z; flags |= 1; }
+/* 링크 길이 절약: HTML 태그를 제어문자 1글자로 바꾸고 JSON 껍데기를 없앤 간결 형식 (플래그 4) */
+const TAGS = [['<div>', '\x01'], ['</div>', '\x02'], ['<br>', '\x03'], ['<b>', '\x04'], ['</b>', '\x05'], ['<i>', '\x06'], ['</i>', '\x07'],
+  ['<u>', '\x08'], ['</u>', '\x0e'], ['<p>', '\x0f'], ['</p>', '\x10'], ['<strong>', '\x11'], ['</strong>', '\x12'], ['<em>', '\x13'], ['</em>', '\x14']];
+const packMemo = (t, h) => { for (const [a, b] of TAGS) h = h.split(a).join(b); return t + '\x00' + h; };
+const unpackMemo = s => {
+  const i = s.indexOf('\x00'); if (i < 0) throw new Error('bad');
+  let h = s.slice(i + 1); for (const [a, b] of TAGS) h = h.split(b).join(a);
+  return { t: s.slice(0, i), h };
+};
+const CTRL = /[\x00-\x08\x0e-\x1f]/;
+/* 한글을 초성/중성/종성 바이트로 쪼개 압축이 더 잘 되게 함 (플래그 8). 한글 외 문자는 0xFF + UTF-8 로 그대로 보관 */
+function jamoEnc(s) {
+  const o = [];
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    if (c < 0x80) o.push(c);
+    else if (c >= 0xAC00 && c <= 0xD7A3) {
+      const n = c - 0xAC00, ju = ((n % 588) / 28) | 0, jo = n % 28;
+      o.push(0x80 + ((n / 588) | 0), (jo ? 0xC0 : 0xA0) + ju); if (jo) o.push(0xE0 + jo);
+    } else o.push(0xFF, ...enc.encode(ch));
+  }
+  return Uint8Array.from(o);
+}
+function jamoDec(u) {
+  const cp = [], bad = () => { throw new Error('bad'); };
+  for (let i = 0; i < u.length;) {
+    const b = u[i++];
+    if (b < 0x80) cp.push(b);
+    else if (b <= 0x92) {
+      const x = u[i++]; let ju, jo = 0;
+      if (x >= 0xA0 && x <= 0xB4) ju = x - 0xA0;
+      else if (x >= 0xC0 && x <= 0xD4) { ju = x - 0xC0; jo = u[i++] - 0xE0; if (!(jo >= 1 && jo <= 27)) bad(); }
+      else bad();
+      cp.push(0xAC00 + ((b - 0x80) * 21 + ju) * 28 + jo);
+    } else if (b === 0xFF) {
+      const l = u[i], n = l >= 0xF0 ? 4 : l >= 0xE0 ? 3 : l >= 0xC0 ? 2 : 0; if (!n || i + n > u.length) bad();
+      cp.push(dec.decode(u.slice(i, i + n)).codePointAt(0)); i += n;
+    } else bad();
+  }
+  let r = ''; for (let i = 0; i < cp.length; i += 8192) r += String.fromCodePoint.apply(null, cp.slice(i, i + 8192));
+  return r;
+}
+function shareBase() {
+  if (!/^https?:$/.test(location.protocol)) return location.href.split('#')[0];
+  const u = new URL(location.href); u.hash = ''; u.pathname = u.pathname.replace(/\/index\.html$/i, '/');
+  return u.href;
+}
+async function buildPayload(m, pw) {
+  const t = titleEl.value, h = sanitize(bodyEl.innerHTML);
+  let cands;
+  if (CTRL.test(t) || CTRL.test(h)) cands = [[0, enc.encode(JSON.stringify({ t, h }))]];   // 드문 경우: 예전 형식으로
+  else { const p = packMemo(t, h); cands = [[4, enc.encode(p)], [12, jamoEnc(p)]]; }
+  let data, flags = 0;
+  for (const [f, d0] of cands) {                       // 후보 중 가장 짧은 것을 고름
+    let d = d0, fl = f; const z = await deflate(d); if (z && z.length < d.length) { d = z; fl |= 1; }
+    if (!data || d.length < data.length) { data = d; flags = fl; }
+  }
   let out;
   if (m.lock) { const s = sessions[m.id]; out = cat([flags | 2], s.salt, await aesEnc(s.key, data)); }
   else if (pw) { const salt = crypto.getRandomValues(new Uint8Array(16)); out = cat([flags | 2], salt, await aesEnc(await deriveKey(pw, salt), data)); }
   else out = cat([flags], data);
-  return location.href.split('#')[0] + '#m=' + b64(out);
+  return b64(out);
 }
+const buildLink = async (m, pw) => shareBase() + '#m=' + await buildPayload(m, pw);
 function renderShare() {
   const m = cur();
   sheetBody.innerHTML = `
@@ -1212,7 +1267,15 @@ function renderShare() {
     <p class="err" id="shErr" style="margin-top:10px"></p>
     <button class="btn-primary block" data-act="mkLink">${ic('link')}링크 만들기</button>
     <div class="out" id="shOut"></div>
-    <p class="note">메모는 서버에 올라가지 않고, 내용이 링크 안에 담겨요. 링크에는 만든 시점의 내용이 들어가니, 메모를 고친 뒤에는 링크를 다시 만들어 보내세요. 길이가 긴 메모는 링크가 길어서 일부 메신저에서 잘릴 수 있어요.</p>`;
+    <p class="note">${window.Sync && window.Sync.state.user
+      ? '로그인 상태라 링크를 짧게 만들려고 메모 내용이 Firebase에 저장돼요. 비밀번호를 걸면 암호화된 채로 저장되고, 비밀번호가 없으면 링크를 아는 사람은 누구나 볼 수 있어요. 링크에는 만든 시점의 내용이 들어가니, 메모를 고친 뒤에는 링크를 다시 만들어 보내세요.'
+      : '메모는 서버에 올라가지 않고, 내용이 링크 안에 담겨요. 링크에는 만든 시점의 내용이 들어가니, 메모를 고친 뒤에는 링크를 다시 만들어 보내세요. 길이가 긴 메모는 링크가 길어서 일부 메신저에서 잘릴 수 있어요.'}</p>`;
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+function newShareId() {                                  // 헷갈리는 글자(0 O 1 l I)를 뺀 57자 중 10자
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'; let id = '';
+  while (id.length < 10) for (const x of crypto.getRandomValues(new Uint8Array(16))) if (x < 228 && id.length < 10) id += A[x % 57];
+  return id;
 }
 async function shareAct(act, b) {
   if (act === 'copyLink') { const v = $('#shLink').value; toast((await copyText(v)) ? '링크를 복사했어요' : '복사하지 못했어요. 직접 선택해서 복사해 주세요'); return; }
@@ -1223,13 +1286,20 @@ async function shareAct(act, b) {
   b.disabled = true;
   try {
     await saveNow();
-    const link = await buildLink(m, pw), prot = m.lock || pw;
+    const payload = await buildPayload(m, pw), prot = m.lock || pw;
+    let link = shareBase() + '#m=' + payload, short = false;
+    if (window.Sync && window.Sync.state.user) {         // 로그인 상태면 Firebase에 저장하고 짧은 링크로
+      try { const id = newShareId(); await withTimeout(window.Sync.putShare(id, payload), 8000); link = shareBase() + '#s=' + id; short = true; }
+      catch (e) { console.error(e); toast('짧은 링크를 만들지 못해서 긴 링크로 만들었어요'); }
+    }
+    const needLogin = !short && window.Sync && window.Sync.state.configured && !window.Sync.state.user;
     $('#shOut').innerHTML = `
-      <div class="sec" style="margin-top:0"><span>${prot ? '비밀번호로 보호된 링크' : '비밀번호 없는 링크'}</span><span>${link.length.toLocaleString()}자</span></div>
+      <div class="sec" style="margin-top:0"><span>${prot ? '비밀번호로 보호된 링크' : '비밀번호 없는 링크'}${short ? ' · 짧은 링크' : ''}</span><span>${link.length.toLocaleString()}자</span></div>
       <input id="shLink" class="in" readonly>
       <div class="row"><button class="btn-primary grow" data-act="copyLink">${ic('copy')}링크 복사</button>
       ${navigator.share ? `<button class="btn-ghost" data-act="nativeShare">${ic('send')}공유</button>` : ''}</div>
-      ${link.length > 8000 ? '<p class="note" style="color:var(--danger)">링크가 아주 길어요. 일부 앱에서는 잘릴 수 있으니 받는 사람이 열리는지 확인해 보세요.</p>' : ''}`;
+      ${link.length > 8000 ? '<p class="note" style="color:var(--danger)">링크가 아주 길어요. 일부 앱에서는 잘릴 수 있으니 받는 사람이 열리는지 확인해 보세요.</p>' : ''}
+      ${needLogin ? '<p class="note">동기화에 로그인하면 훨씬 짧은 링크로 만들어져요.</p>' : ''}`;
     $('#shLink').value = link; $('#shLink').addEventListener('focus', e => e.target.select());
   } catch (e) { console.error(e); err.textContent = '링크를 만들지 못했어요. HTTPS 주소에서 열었는지 확인해 주세요.'; }
   b.disabled = false;
@@ -1591,7 +1661,8 @@ function renderShared(obj) {
 async function finishShared(flags, data) {
   try {
     if (flags & 1) data = await inflate(data);
-    const obj = JSON.parse(dec.decode(data));
+    const txt = (flags & 8) ? jamoDec(data) : dec.decode(data);
+    const obj = (flags & 4) ? unpackMemo(txt) : JSON.parse(txt);
     if (typeof obj.h !== 'string') throw new Error('bad');
     renderShared({ t: String(obj.t || ''), h: obj.h });
   } catch (e) {
@@ -1608,6 +1679,27 @@ async function loadShared(raw) {
     pending = { flags, salt: bytes.slice(1, 17), data: bytes.slice(17) };
     $('#vPw').value = ''; $('#vErr').textContent = ''; vShow('vLock'); if (!isMobile()) $('#vPw').focus();
   } else await finishShared(flags, bytes.slice(1));
+}
+/* 짧은 링크(#s=아이디): Firebase에서 링크 내용을 받아와 기존 열기 과정에 그대로 넘김 */
+let shortTok = 0;
+const waitSync = () => new Promise(res => { const t0 = Date.now(); (function p() { if (window.Sync) res(window.Sync); else if (Date.now() - t0 > 10000) res(null); else setTimeout(p, 50); })(); });
+async function loadShort(id) {
+  const tok = ++shortTok; shared = null; pending = null;
+  const bad = msg => { if (tok === shortTok) { $('#vBad').innerHTML = msg; vShow('vBad'); } };
+  if (!/^[A-Za-z0-9]{6,32}$/.test(id)) { bad('링크가 올바르지 않아요.<br>보낸 사람에게 링크를 다시 받아 보세요.'); return; }
+  bad('불러오는 중…');
+  let raw;
+  try {
+    const S = await waitSync(); if (!S) throw new Error('nosync');
+    raw = await withTimeout(S.getShare(id), 12000);
+  } catch (e) {
+    const c = e && e.code;
+    bad(c === 'not-found' ? '이 링크의 메모를 찾을 수 없어요.<br>주소가 잘못되었거나 삭제되었을 수 있어요.'
+      : c === 'permission-denied' ? '메모를 불러올 권한이 없어요.<br>보낸 사람에게 확인해 보세요.'
+      : '메모를 불러오지 못했어요.<br>인터넷 연결을 확인하고 새로고침해 주세요.');
+    return;
+  }
+  if (tok === shortTok) await loadShared(raw);
 }
 async function openShared() {
   if (!pending) return;
@@ -1661,10 +1753,10 @@ function goApp(openId) {
 }
 
 function route() {
-  const h = location.hash;
-  if (h.startsWith('#m=')) {
+  const h = location.hash; shortTok++;
+  if (h.startsWith('#m=') || h.startsWith('#s=')) {
     mode = 'view'; $('#app').hidden = true; $('#viewer').hidden = false; closeSheet();
-    document.body.classList.remove('drawer'); loadShared(h.slice(3));
+    document.body.classList.remove('drawer'); h[1] === 's' ? loadShort(h.slice(3)) : loadShared(h.slice(3));
   } else {
     mode = 'app'; $('#app').hidden = false; $('#viewer').hidden = true; shared = null; pending = null;
   }
@@ -1687,6 +1779,7 @@ if (mode === 'app' && !isMobile() && memos.length) openMemo([...memos].sort((a, 
 const V = '10.14.1';
 const state = { configured: false, user: null, status: 'loading', error: '' };
 const api = {};
+let done; const ready = new Promise(r => { done = r; });      // Firebase 초기화가 끝나(또는 안 쓰기로 정해지)면 풀림
 const notify = () => window.MemoApp && window.MemoApp.onSync();
 window.Sync = {
   state,
@@ -1695,13 +1788,15 @@ window.Sync = {
   pushSnips: (items, at) => api.pushSnips && api.pushSnips(items, at),
   signIn: (e, p) => api.signIn(e, p),
   signUp: (e, p) => api.signUp(e, p),
-  logout: () => api.logout()
+  logout: () => api.logout(),
+  putShare: (id, p) => api.putShare ? api.putShare(id, p) : Promise.reject(new Error('nosync')),
+  getShare: async id => { await ready; if (!api.getShare) throw new Error('nosync'); return api.getShare(id); }
 };
 
 (async () => {
   let cfg = {};
   try { cfg = (await import('./firebase-config.js')).default || {}; } catch {}
-  if (!cfg.apiKey || !cfg.projectId) { state.status = 'out'; notify(); return; }
+  if (!cfg.apiKey || !cfg.projectId) { state.status = 'out'; notify(); done(); return; }
   state.configured = true;
   try {
     const base = `https://www.gstatic.com/firebasejs/${V}/`;
@@ -1729,6 +1824,17 @@ window.Sync = {
     api.signIn = (e, p) => Au.signInWithEmailAndPassword(auth, e, p);
     api.signUp = (e, p) => Au.createUserWithEmailAndPassword(auth, e, p);
     api.logout = () => Au.signOut(auth);
+    /* 짧은 공유 링크: shares/{id} 문서에 링크 내용(payload)을 저장. 비밀번호 링크는 이미 암호화된 상태로 저장돼요. */
+    api.putShare = (id, payload) => {
+      if (!uid) return Promise.reject(new Error('nosync'));
+      return F.setDoc(F.doc(db, 'shares', id), { p: payload, owner: uid, created: Date.now() });
+    };
+    api.getShare = async id => {
+      const d = await F.getDoc(F.doc(db, 'shares', id));
+      if (!d.exists() || typeof d.data().p !== 'string') throw Object.assign(new Error('nf'), { code: 'not-found' });
+      return d.data().p;
+    };
+    done();
 
     function start(user) {
       uid = user.uid; let first = true, firstSnip = true;
@@ -1763,7 +1869,7 @@ window.Sync = {
       unsubs.forEach(u => u()); unsubs = []; uid = null; state.user = user || null;
       if (user) start(user); else { state.status = 'out'; notify(); }
     });
-  } catch (e) { state.status = 'fail'; state.error = String((e && e.message) || e); notify(); }
+  } catch (e) { state.status = 'fail'; state.error = String((e && e.message) || e); notify(); done(); }
 })();
 </script>
 </body>
