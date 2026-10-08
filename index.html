@@ -186,6 +186,32 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
 .toast{position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));transform:translate(-50%,16px);background:#1c2230;color:#fff;padding:11px 18px;border-radius:999px;font-size:12px;opacity:0;pointer-events:none;transition:.25s;z-index:100;max-width:90vw;text-align:center}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 
+/* ---------- trash ---------- */
+.tr-head{position:sticky;top:0;z-index:2;background:#fff;display:flow-root;padding-bottom:8px}
+.tr-head .sec{margin:6px 0 8px}
+.tr-empty{color:var(--danger)}
+.tr-bar{display:flex;align-items:center;gap:6px}
+.tr-bar .btn-ghost{height:34px;padding:0 12px;font-size:12px}
+.tr-all{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 4px;border-radius:10px;font-size:12px;font-weight:500;color:var(--ink2)}
+.tr-all:hover{background:#f4f6fa}
+.tr-chk{width:20px;height:20px;border-radius:7px;border:1.5px solid #c9d0de;background:#fff;color:#fff;display:grid;place-items:center;flex:none;transition:background .12s,border-color .12s}
+.tr-chk .icon{width:13px;height:13px;stroke-width:2.6;opacity:0}
+.tr-all.on .tr-chk,.tr-item.on .tr-chk{background:var(--primary);border-color:var(--primary)}
+.tr-all.on .tr-chk .icon,.tr-item.on .tr-chk .icon{opacity:1}
+.tr-item{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:14px;margin-bottom:8px;background:#fafbfd;overflow:hidden}
+.tr-item.on{background:#f1f5ff;border-color:var(--primary-line)}
+.tr-sel{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;padding:12px 8px 12px 14px;text-align:left}
+.tr-sel .tr-chk{margin-top:1px}
+.tr-main{flex:1;min-width:0;display:block}
+.tr-title{display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px}
+.tr-title .icon{color:var(--primary)}
+.tr-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-prev{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:4px;font-size:11px;line-height:1.5;color:var(--muted);word-break:break-word}
+.tr-meta{display:block;margin-top:6px;font-size:10.5px;color:#a0a8b8}
+.tr-restore{width:44px;flex:none;display:grid;place-items:center;border-left:1px solid var(--line);color:#6b7589}
+.tr-restore:hover{background:#e9eefb;color:var(--primary)}
+.tr-sel:focus-visible,.tr-restore:focus-visible{outline-offset:-3px}
+
 /* ---------- shared viewer ---------- */
 #viewer{height:100dvh;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:clamp(12px,4vw,44px)}
 .v-card{width:100%;max-width:760px;background:#fff;border-radius:22px;box-shadow:var(--shadow);padding:26px clamp(20px,4vw,40px) 30px}
@@ -242,6 +268,7 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
       <div class="nav-label">메모</div>
       <button class="nav on" data-filter="all"><i data-i="note"></i>모든 메모<span class="cnt" id="cntAll">0</span></button>
       <button class="nav" data-filter="locked"><i data-i="lock"></i>잠긴 메모<span class="cnt" id="cntLocked">0</span></button>
+      <button class="nav" id="navTrash"><i data-i="trash"></i>휴지통<span class="cnt" id="cntTrash">0</span></button>
 
       <div class="nav-label">도구</div>
       <button class="nav" id="navClip"><i data-i="clipboard"></i>클립보드<span class="cnt" id="cntClip">0</span></button>
@@ -381,7 +408,8 @@ const P = {
   check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   cloud:'<path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10.5a3.8 3.8 0 0 1-.5 7.5z"/>',
-  send:'<path d="M12 4v11M7.5 8.5 12 4l4.5 4.5M5 14v5.5h14V14"/>'
+  send:'<path d="M12 4v11M7.5 8.5 12 4l4.5 4.5M5 14v5.5h14V14"/>',
+  restore:'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'
 };
 const ic = (n, c = '') => `<svg class="icon ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
 $$('[data-i]').forEach(el => { el.outerHTML = ic(el.dataset.i); });
@@ -581,12 +609,16 @@ async function createMemo() {
 
 async function deleteMemo() {
   const m = cur(); if (!m) return;
-  if (!confirm('"' + (m.title || '제목 없음') + '" 메모를 삭제할까요?\n삭제하면 되돌릴 수 없어요.')) return;
+  if (!confirm('"' + (m.title || '제목 없음') + '" 메모를 휴지통으로 옮길까요?\n' + TRASH_DAYS + '일 동안 보관되고, 그 뒤에는 자동으로 삭제돼요.')) return;
+  if (dirty) await saveNow();                    // 쓰던 내용까지 휴지통에 담기
   clearTimeout(saveTimer); dirty = false;
+  trash.unshift({ ...m, trashedAt: Date.now() });
+  if (!saveTrash()) { trash.shift(); return; }   // 저장 공간이 없으면 메모를 지우지 않음
   syncDel(m); memos = memos.filter(x => x.id !== m.id); delete sessions[m.id]; store.set(K.memos, memos);
+  updateTrashCnt(); if (panel === 'trash') renderTrash();
   curId = null; edEl.hidden = true; emptyEl.hidden = false; renderList(); showView('list');
   if (!isMobile()) { const f = [...memos].sort((a, b) => b.updated - a.updated)[0]; if (f) openMemo(f.id); }
-  toast('삭제했어요');
+  toast('휴지통으로 옮겼어요');
 }
 
 /* ================= save ================= */
@@ -1104,6 +1136,7 @@ const PANELS = {
   spell:   { title: '맞춤법 검사', render: renderSpell, act: spellAct, needsEdit: true },
   snip:    { title: '단축 문구', render: renderSnips, act: snipAct },
   clip:    { title: '클립보드', render: renderClips, act: clipAct },
+  trash:   { title: '휴지통', render: () => { trSel.clear(); renderTrash(); }, act: trashAct },
   lock:    { title: '비밀번호', render: renderLock, act: lockAct, needsEdit: true },
   share:   { title: '링크로 공유', render: renderShare, act: shareAct, needsEdit: true },
   sync:    { title: '동기화', render: renderSync, act: syncAct }
@@ -1135,6 +1168,122 @@ sheetBody.addEventListener('keydown', e => {
 $('#sheetClose').addEventListener('click', closeSheet);
 scrim.addEventListener('click', closeSheet);
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && panel && !recording) closeSheet(); });
+
+/* ================= 휴지통 (삭제한 메모 30일 보관) ================= */
+const TRASH_KEY = 'memo.v1.trash', TRASH_DAYS = 30, TRASH_TTL = TRASH_DAYS * 86400e3;
+let trash = (() => {
+  const a = store.get(TRASH_KEY, []);
+  return Array.isArray(a) ? a.filter(t => t && t.id).map(t => Number.isFinite(t.trashedAt) ? t : { ...t, trashedAt: Date.now() }) : [];
+})();
+const trSel = new Set();
+const saveTrash = () => store.set(TRASH_KEY, trash);
+const updateTrashCnt = () => { $('#cntTrash').textContent = trash.length; };
+
+// 30일이 지난 메모를 지워요. (다른 기기에서 다시 만들어진 같은 메모와 겹치는 항목도 함께 정리)
+function trashSweep() {
+  const now = Date.now();
+  const keep = trash.filter(t => now - t.trashedAt < TRASH_TTL && !memos.some(m => m.id === t.id));
+  if (keep.length === trash.length) return false;
+  trash = keep; saveTrash(); return true;
+}
+function sweepNow() { if (trashSweep()) { updateTrashCnt(); if (panel === 'trash') renderTrash(); } }
+
+function renderTrash() {
+  trashSweep();
+  for (const id of [...trSel]) if (!trash.some(t => t.id === id)) trSel.delete(id);
+  updateTrashCnt();
+  if (!trash.length) {
+    sheetBody.innerHTML = `<p class="hint">삭제한 메모는 ${TRASH_DAYS}일 동안 이곳에 보관돼요.</p><div class="none" style="padding:30px 0">휴지통이 비어 있어요.</div>`;
+    return;
+  }
+  const item = t => {
+    const on = trSel.has(t.id), left = TRASH_TTL - (Date.now() - t.trashedAt);
+    const when = left < 86400e3 ? '24시간 이내 자동 삭제' : Math.ceil(left / 86400e3) + '일 후 자동 삭제';
+    return `
+    <div class="tr-item${on ? ' on' : ''}" data-id="${esc(t.id)}">
+      <button class="tr-sel" data-act="toggle" aria-pressed="${on}">
+        <span class="tr-chk">${ic('check')}</span>
+        <span class="tr-main">
+          <span class="tr-title"><span class="tr-t">${esc(t.title || '제목 없음')}</span>${t.lock ? ic('lock', 'sm') : ''}</span>
+          <span class="tr-prev">${t.lock ? '비밀번호로 보호된 메모' : (esc(plain(t.html).slice(0, 100)) || '내용 없음')}</span>
+          <span class="tr-meta">${fmtTime(t.trashedAt)} 삭제 · ${when}</span>
+        </span>
+      </button>
+      <button class="tr-restore" data-act="restore" aria-label="복원" title="복원">${ic('restore')}</button>
+    </div>`;
+  };
+  sheetBody.innerHTML = `
+    <p class="hint">삭제한 메모는 ${TRASH_DAYS}일 동안 보관된 뒤 자동으로 완전히 삭제돼요.</p>
+    <div class="tr-head">
+      <div class="sec"><span id="trCount"></span><button class="link tr-empty" data-act="empty">휴지통 비우기</button></div>
+      <div class="tr-bar">
+        <button class="tr-all" data-act="selAll" aria-pressed="false"><span class="tr-chk">${ic('check')}</span>전체 선택</button>
+        <span class="grow"></span>
+        <button class="btn-ghost" data-act="restoreSel" disabled>선택 복원</button>
+        <button class="btn-ghost btn-danger" data-act="delSel" disabled>선택 삭제</button>
+      </div>
+    </div>
+    ${trash.map(item).join('')}
+    ${syncOn() ? '<p class="note">휴지통은 이 기기에만 보관돼요. 동기화를 켜 두면 다른 기기에서는 삭제한 메모가 바로 사라져요.</p>' : ''}`;
+  trBar();
+}
+function trBar() {
+  const cnt = $('#trCount', sheetBody); if (!cnt) return;
+  const n = trSel.size, total = trash.length, all = total > 0 && n === total;
+  cnt.textContent = n ? `${total}개 중 ${n}개 선택` : `보관 중 ${total}개`;
+  const a = $('.tr-all', sheetBody); a.classList.toggle('on', all); a.setAttribute('aria-pressed', all);
+  $('[data-act="restoreSel"]', sheetBody).disabled = !n;
+  $('[data-act="delSel"]', sheetBody).disabled = !n;
+}
+function trRow(el) {
+  const on = trSel.has(el.dataset.id);
+  el.classList.toggle('on', on); $('.tr-sel', el).setAttribute('aria-pressed', on);
+}
+
+function restoreFromTrash(ids) {
+  const set = new Set(ids), items = trash.filter(t => set.has(t.id));
+  if (!items.length) return;
+  const now = Date.now();
+  // 복원하면 '수정됨'으로 갱신돼요. (동기화 중이면 삭제 기록보다 최신이어야 다시 살아나요)
+  const back = items.map((t, i) => { const m = { ...t }; delete m.trashedAt; m.updated = now - i; return m; });
+  const prev = memos; memos = [...back, ...memos];
+  if (!store.set(K.memos, memos)) { memos = prev; return; }
+  trash = trash.filter(t => !set.has(t.id)); ids.forEach(id => trSel.delete(id)); saveTrash();
+  back.forEach(m => syncPush(m));
+  renderList(); renderTrash();
+  toast(back.length === 1 ? '메모를 복원했어요' : back.length + '개 메모를 복원했어요');
+}
+function purgeFromTrash(ids) {
+  const set = new Set(ids), n = trash.filter(t => set.has(t.id)).length;
+  if (!n) return;
+  if (!confirm('선택한 메모 ' + n + '개를 완전히 삭제할까요?\n삭제하면 되돌릴 수 없어요.')) return;
+  trash = trash.filter(t => !set.has(t.id)); ids.forEach(id => trSel.delete(id)); saveTrash();
+  renderTrash(); toast(n + '개 메모를 완전히 삭제했어요');
+}
+function emptyTrash() {
+  if (!trash.length) return;
+  if (!confirm('휴지통을 비울까요?\n메모 ' + trash.length + '개가 완전히 삭제되고 되돌릴 수 없어요.')) return;
+  trash = []; trSel.clear(); saveTrash(); renderTrash(); toast('휴지통을 비웠어요');
+}
+function trashAct(act, b) {
+  if (act === 'toggle') {
+    const el = b.closest('.tr-item'), id = el.dataset.id;
+    if (trSel.has(id)) trSel.delete(id); else trSel.add(id);
+    trRow(el); trBar(); return;
+  }
+  if (act === 'selAll') {
+    if (trSel.size === trash.length) trSel.clear(); else trash.forEach(t => trSel.add(t.id));
+    $$('.tr-item', sheetBody).forEach(trRow); trBar(); return;
+  }
+  if (act === 'restore') restoreFromTrash([b.closest('.tr-item').dataset.id]);
+  else if (act === 'restoreSel') restoreFromTrash([...trSel]);
+  else if (act === 'delSel') purgeFromTrash([...trSel]);
+  else if (act === 'empty') emptyTrash();
+}
+$('#navTrash').addEventListener('click', () => openPanel('trash'));
+setInterval(sweepNow, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) sweepNow(); });
+trashSweep(); updateTrashCnt();
 
 /* ================= wiring ================= */
 $('#btnNew').addEventListener('click', createMemo);
