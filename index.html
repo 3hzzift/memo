@@ -225,6 +225,10 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
 .v-lock .in{max-width:300px;text-align:center}
 .v-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px;padding-top:18px;border-top:1px solid #f0f2f6}
 
+/* ---------- shared viewer: copy ---------- */
+.v-copy{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.v-copy .btn-ghost{height:36px;padding:0 14px;font-size:12px}
+
 /* ---------- responsive ---------- */
 @media (min-width:1000px){
   .sheet{left:auto;right:28px;top:28px;bottom:28px;width:390px;max-height:none;border-radius:20px;box-shadow:0 30px 70px -20px rgba(20,40,90,.45);transform:translateX(calc(100% + 40px))}
@@ -356,6 +360,10 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
 
     <article id="vNote" hidden>
       <h1 id="vTitle"></h1>
+      <div class="v-copy">
+        <button class="btn-ghost" id="vCopyAll"><i data-i="copy"></i>제목 포함 복사</button>
+        <button class="btn-ghost" id="vCopyBody"><i data-i="copy"></i>내용만 복사</button>
+      </div>
       <div class="body" id="vBody" style="min-height:0"></div>
       <div class="v-actions">
         <button class="btn-primary" id="vSave"><i data-i="plus"></i>내 메모에 저장</button>
@@ -1362,6 +1370,33 @@ $('#vSave').addEventListener('click', () => {
   goApp(m.id);
 });
 $('#vHome').addEventListener('click', () => goApp());
+
+/* 공유된 메모 전체 복사 */
+function toText(html) {                      // 줄바꿈을 살린 일반 텍스트로 변환
+  const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  let out = '';
+  const nl = () => { if (out && !out.endsWith('\n')) out += '\n'; };
+  (function walk(node) {
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) out += n.nodeValue;
+      else if (n.nodeType === 1) {
+        if (n.tagName === 'BR') out += '\n';
+        else if (n.tagName === 'DIV' || n.tagName === 'P') { nl(); walk(n); nl(); }
+        else walk(n);
+      }
+    }
+  })(doc.body);
+  return out.replace(/\u00a0/g, ' ').replace(/\n+$/, '');
+}
+async function copyShared(withTitle) {
+  if (!shared) return;
+  const body = toText(shared.h), title = (shared.t || '').trim();
+  const text = withTitle && title ? (body ? title + '\n\n' + body : title) : body;
+  if (!text) { toast('복사할 내용이 없어요'); return; }
+  toast((await copyText(text)) ? (withTitle ? '제목과 내용을 복사했어요' : '내용을 복사했어요') : '복사하지 못했어요');
+}
+$('#vCopyAll').addEventListener('click', () => copyShared(true));
+$('#vCopyBody').addEventListener('click', () => copyShared(false));
 function goApp(openId) {
   history.replaceState(null, '', location.pathname + location.search);
   route(); if (openId) openMemo(openId);
