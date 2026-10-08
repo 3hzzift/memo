@@ -195,6 +195,23 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
 .toast{position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));transform:translate(-50%,16px);background:#1c2230;color:#fff;padding:11px 18px;border-radius:999px;font-size:12px;opacity:0;pointer-events:none;transition:.25s;z-index:100;max-width:90vw;text-align:center}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 
+/* ---------- folders ---------- */
+.nav-label.fo{display:flex;align-items:center;justify-content:space-between;padding-right:4px}
+.fo-add{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.fo-add:hover{background:rgba(20,30,60,.07);color:var(--primary)}
+.fo-add .icon{width:15px;height:15px}
+.fo-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fo-none{padding:6px 12px;font-size:11px;color:var(--muted)}
+.c-fo{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:8px;font-size:10.5px;font-weight:500;color:var(--primary);background:var(--primary-soft);border-radius:999px;padding:2px 9px 2px 7px}
+.c-fo .icon{width:11px;height:11px}
+.c-fo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list-row .ibtn.fo-act{width:32px;height:32px}
+.fo-pick{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:14px;margin-bottom:8px;background:#fafbfd;text-align:left;font-size:13px;font-weight:500}
+.fo-pick:hover{background:#f1f5ff}
+.fo-pick.on{background:#f1f5ff;border-color:var(--primary-line);color:var(--primary)}
+.fo-pick .icon.ck{opacity:0}
+.fo-pick.on .icon.ck{opacity:1}
+
 /* ---------- trash ---------- */
 .tr-head{position:sticky;top:0;z-index:2;background:#fff;display:flow-root;padding-bottom:8px}
 .tr-head .sec{margin:6px 0 8px}
@@ -283,6 +300,9 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
       <button class="nav" data-filter="locked"><i data-i="lock"></i>잠긴 메모<span class="cnt" id="cntLocked">0</span></button>
       <button class="nav" id="navTrash"><i data-i="trash"></i>휴지통<span class="cnt" id="cntTrash">0</span></button>
 
+      <div class="nav-label fo">폴더<button class="fo-add" id="btnFolderAdd" aria-label="새 폴더"><i data-i="plus"></i></button></div>
+      <div id="folderNav"></div>
+
       <div class="nav-label">도구</div>
       <button class="nav" id="navClip"><i data-i="clipboard"></i>클립보드<span class="cnt" id="cntClip">0</span></button>
       <button class="nav" id="navSnip"><i data-i="keyboard"></i>단축 문구<span class="cnt" id="cntSnip">0</span></button>
@@ -296,7 +316,9 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
       <div class="list-head">
         <div class="list-row">
           <button class="ibtn menu-btn" id="btnMenu" aria-label="메뉴"><i data-i="menu"></i></button>
-          <h2>메모</h2>
+          <h2 id="listTitle">메모</h2>
+          <button class="ibtn fo-act" id="btnFoRename" aria-label="폴더 이름 바꾸기" hidden><i data-i="edit"></i></button>
+          <button class="ibtn fo-act del" id="btnFoDel" aria-label="폴더 삭제" hidden><i data-i="trash"></i></button>
           <span class="grow"></span>
           <button class="fab" id="btnNew2" aria-label="새 메모"><i data-i="plus"></i></button>
         </div>
@@ -321,6 +343,7 @@ kbd{display:inline-block;min-width:24px;padding:3px 7px;margin-right:4px;border-
             <button class="fbtn" data-cmd="underline" aria-label="밑줄"><u>U</u></button>
           </div>
           <span class="grow"></span>
+          <button class="ibtn" id="btnFolder" aria-label="폴더" title="폴더로 옮기기"><i data-i="folder"></i></button>
           <button class="ibtn" id="btnLock" aria-label="비밀번호"></button>
           <button class="ibtn" id="btnShare" aria-label="링크 공유"><i data-i="link"></i></button>
           <button class="ibtn del" id="btnDel" aria-label="삭제"><i data-i="trash"></i></button>
@@ -426,7 +449,8 @@ const P = {
   edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   cloud:'<path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10.5a3.8 3.8 0 0 1-.5 7.5z"/>',
   send:'<path d="M12 4v11M7.5 8.5 12 4l4.5 4.5M5 14v5.5h14V14"/>',
-  restore:'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'
+  restore:'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+  folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
 };
 const ic = (n, c = '') => `<svg class="icon ${c}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
 $$('[data-i]').forEach(el => { el.outerHTML = ic(el.dataset.i); });
@@ -518,7 +542,7 @@ const plain = html => {
 };
 
 /* ================= state ================= */
-const K = { memos: 'memo.v1.memos', snips: 'memo.v1.snips', clips: 'memo.v1.clips', snipsAt: 'memo.v1.snipsAt' };
+const K = { memos: 'memo.v1.memos', snips: 'memo.v1.snips', clips: 'memo.v1.clips', snipsAt: 'memo.v1.snipsAt', folders: 'memo.v1.folders' };
 const MAX_CLIPS = 15;
 const WELCOME = '<b>Memo에 오신 것을 환영해요</b><br><br>• 입력하면 자동으로 저장돼요.<br>• 위쪽 자물쇠로 이 메모에 비밀번호를 걸 수 있어요.<br>• 링크 버튼으로 공유 링크를 만들어 보내세요. 비밀번호를 걸면 링크 안의 내용도 암호화돼요.<br>• 단축 문구에서 Alt+1 같은 단축키를 지정하면 자주 쓰는 문구를 바로 넣을 수 있어요.<br>• 단어를 드래그한 뒤 "일괄 바꾸기"를 누르면 같은 단어를 한 번에 바꿀 수 있어요.<br>• 복사하거나 잘라낸 내용은 클립보드에 최근 15개까지 남고, 핀으로 고정하면 계속 남아요.';
 
@@ -530,6 +554,7 @@ let snips = store.get(K.snips, [
   { id: 's2', key: 'Alt+2', text: '감사합니다.' }
 ]);
 let clips = store.get(K.clips, []);
+let folders = store.get(K.folders, []); if (!Array.isArray(folders)) folders = [];
 let snipsAt = store.get(K.snipsAt, 0);
 let curId = null, filter = 'all', query = '';
 const sessions = {};          // memoId -> { key, salt } (메모리에만 보관)
@@ -542,10 +567,26 @@ const edEl = $('#ed'), emptyEl = $('#emptyState'), lockScreen = $('#lockScreen')
 const mqDesktop = matchMedia('(min-width:700px)');
 const isMobile = () => !mqDesktop.matches;
 const cur = () => memos.find(m => m.id === curId);
+const folderNames = () => [...new Set([...folders, ...memos.map(m => m.f).filter(Boolean)])].sort((a, b) => a.localeCompare(b, 'ko'));
+const inFolder = n => memos.filter(m => m.f === n);
+const saveFolders = () => store.set(K.folders, folders);
 const editable = () => { const m = cur(); return !!m && !edEl.hidden && (!m.lock || !!sessions[m.id]); };
 
 /* ================= list ================= */
+function renderFolders() {
+  const names = folderNames();
+  $('#folderNav').innerHTML = names.length
+    ? names.map(n => `<button class="nav${filter === 'f:' + n ? ' on' : ''}" data-fo="${esc(n)}">${ic('folder')}<span class="fo-n">${esc(n)}</span><span class="cnt">${inFolder(n).length}</span></button>`).join('')
+    : '<div class="fo-none">폴더가 없어요</div>';
+  $$('.nav[data-filter]').forEach(x => x.classList.toggle('on', x.dataset.filter === filter));
+}
+
 function renderList() {
+  if (filter.startsWith('f:') && !folderNames().includes(filter.slice(2))) filter = 'all';
+  const fo = filter.startsWith('f:') ? filter.slice(2) : null;
+  renderFolders();
+  $('#listTitle').textContent = fo !== null ? fo : '메모';
+  $('#btnFoRename').hidden = $('#btnFoDel').hidden = fo === null;
   const q = query.trim().toLowerCase();
   let arr = [...memos].sort((a, b) => b.updated - a.updated);
   $('#cntAll').textContent = memos.length;
@@ -554,13 +595,15 @@ function renderList() {
   $('#cntClip').textContent = clips.length;
   const n = clips.length; const cn = $('#chClipN'); cn.hidden = !n; cn.textContent = n;
   if (filter === 'locked') arr = arr.filter(m => m.lock);
+  if (fo !== null) arr = arr.filter(m => m.f === fo);
   if (q) arr = arr.filter(m => (m.title || '').toLowerCase().includes(q) || (!m.lock && plain(m.html).toLowerCase().includes(q)));
   cardsEl.innerHTML = arr.length ? arr.map(m => `
     <button class="card${m.id === curId ? ' on' : ''}" data-id="${m.id}">
       <div class="c-top"><span class="c-title">${esc(m.title || '제목 없음')}</span>${m.lock ? ic('lock', 'sm') : ''}<time>${fmtTime(m.updated)}</time></div>
       <div class="c-prev">${m.lock ? '비밀번호로 보호된 메모' : (esc(plain(m.html).slice(0, 100)) || '내용 없음')}</div>
+      ${m.f && fo === null ? `<div class="c-fo">${ic('folder')}<span>${esc(m.f)}</span></div>` : ''}
     </button>`).join('')
-    : `<div class="none">${q ? '검색 결과가 없어요.' : (filter === 'locked' ? '잠긴 메모가 없어요.' : '아직 메모가 없어요.<br>새 메모를 만들어 보세요.')}</div>`;
+    : `<div class="none">${q ? '검색 결과가 없어요.' : (filter === 'locked' ? '잠긴 메모가 없어요.' : fo !== null ? '이 폴더에 메모가 없어요.<br>새 메모를 만들면 이 폴더에 담겨요.' : '아직 메모가 없어요.<br>새 메모를 만들어 보세요.')}</div>`;
 }
 
 /* ================= open / leave / create ================= */
@@ -578,12 +621,18 @@ async function openMemo(id, focus = false) {
   if (curId && curId !== id) await leave();
   curId = id; undoSnap = null;
   const m = cur(); if (!m) return;
+  let html = m.html;
+  if (m.lock && sessions[id]) {          // 잠금을 푼 메모는 암호문에서 내용을 꺼내 와요 (m.html은 비어 있어요)
+    try { html = JSON.parse(dec.decode(await aesDec(sessions[id].key, unb64(m.lock.d)))).h; }
+    catch { delete sessions[id]; }
+    if (curId !== id) return;
+  }
   edEl.hidden = false; emptyEl.hidden = true;
   titleEl.value = m.title || '';
   if (m.lock && !sessions[id]) {
     bodyEl.innerHTML = ''; lockScreen.hidden = false; $('#lsInput').value = ''; $('#lsErr').textContent = '';
   } else {
-    lockScreen.hidden = true; bodyEl.innerHTML = sanitize(m.html);
+    lockScreen.hidden = true; bodyEl.innerHTML = sanitize(html);
   }
   syncUI(); renderList(); showView('editor');
   if (isMobile() && !(history.state && history.state.ed)) history.pushState({ ed: 1 }, '');
@@ -619,6 +668,7 @@ const setStatus = t => { $('#status').textContent = t; };
 async function createMemo() {
   if (curId) await leave();
   const m = { id: uid(), title: '', html: '', updated: Date.now(), lock: null };
+  if (filter.startsWith('f:')) m.f = filter.slice(2);   // 폴더를 보는 중이면 그 폴더에 담기
   memos.unshift(m); store.set(K.memos, memos);
   curId = null; await openMemo(m.id, true);
   document.body.classList.remove('drawer');
@@ -1261,6 +1311,7 @@ function applyRemote(d) {
   } else {
     if (old && curId === d.id && dirty) return;               // 지금 쓰는 중이면 내 내용을 우선
     const nm = { id: d.id, title: d.title || '', html: d.html || '', updated: d.updated, lock: d.lock || null, sy: true };
+    if (d.f) nm.f = String(d.f);
     if (old) memos[i] = nm; else memos.push(nm);
     if (curId === d.id) refreshCurrent();
   }
@@ -1285,7 +1336,8 @@ const PANELS = {
   trash:   { title: '휴지통', render: () => { trSel.clear(); renderTrash(); }, act: trashAct },
   lock:    { title: '비밀번호', render: renderLock, act: lockAct, needsEdit: true },
   share:   { title: '링크로 공유', render: renderShare, act: shareAct, needsEdit: true },
-  sync:    { title: '동기화', render: renderSync, act: syncAct }
+  sync:    { title: '동기화', render: renderSync, act: syncAct },
+  folder:  { title: '폴더', render: renderFolderPanel, act: folderAct }
 };
 function openPanel(name) {
   const p = PANELS[name];
@@ -1430,6 +1482,74 @@ $('#navTrash').addEventListener('click', () => openPanel('trash'));
 setInterval(sweepNow, 60000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) sweepNow(); });
 trashSweep(); updateTrashCnt();
+
+/* ================= 폴더 ================= */
+const cleanName = s => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+function setFilter(f) {
+  filter = f; renderList(); document.body.classList.remove('drawer'); if (isMobile()) showView('list');
+}
+function addFolder(name) {
+  if (!folderNames().includes(name)) { folders.push(name); saveFolders(); }
+}
+function setMemoFolder(m, name) {
+  if (name) m.f = name; else delete m.f;
+  m.updated = Date.now(); syncPush(m); store.set(K.memos, memos); updateFoot();
+}
+function newFolderPrompt() {
+  const n = cleanName(prompt('새 폴더 이름을 입력하세요'));
+  if (!n) return;
+  const had = folderNames().includes(n); addFolder(n);
+  toast(had ? '이미 있는 폴더예요' : '폴더를 만들었어요'); setFilter('f:' + n);
+}
+function renameFolder() {
+  if (!filter.startsWith('f:')) return;
+  const old = filter.slice(2), n = cleanName(prompt('폴더 이름', old));
+  if (!n || n === old) return;
+  if (folderNames().includes(n)) { toast('이미 있는 폴더예요'); return; }
+  const now = Date.now();
+  memos.forEach(m => { if (m.f === old) { m.f = n; m.updated = now; syncPush(m); } });
+  trash.forEach(t => { if (t.f === old) t.f = n; }); saveTrash();
+  folders = folders.filter(x => x !== old); folders.push(n); saveFolders(); store.set(K.memos, memos);
+  filter = 'f:' + n; renderList(); toast('이름을 바꿨어요');
+}
+function deleteFolder() {
+  if (!filter.startsWith('f:')) return;
+  const n = filter.slice(2), cnt = inFolder(n).length;
+  if (!confirm('"' + n + '" 폴더를 삭제할까요?\n' + (cnt ? '안에 있는 메모 ' + cnt + '개는 지워지지 않고 폴더 없이 남아요.' : '폴더만 삭제돼요.'))) return;
+  const now = Date.now();
+  memos.forEach(m => { if (m.f === n) { delete m.f; m.updated = now; syncPush(m); } });
+  trash.forEach(t => { if (t.f === n) delete t.f; }); saveTrash();
+  folders = folders.filter(x => x !== n); saveFolders(); store.set(K.memos, memos);
+  filter = 'all'; renderList(); toast('폴더를 삭제했어요');
+}
+function renderFolderPanel() {
+  const m = cur();
+  if (!m) { sheetBody.innerHTML = '<p class="hint">메모를 먼저 선택해 주세요.</p>'; return; }
+  sheetBody.innerHTML = `
+    <p class="hint">이 메모를 넣을 폴더를 고르세요.</p>
+    <button class="fo-pick${!m.f ? ' on' : ''}" data-act="pick" data-f="">${ic('note')}<span class="fo-n">폴더 없음</span>${ic('check', 'ck')}</button>
+    ${folderNames().map(n => `<button class="fo-pick${m.f === n ? ' on' : ''}" data-act="pick" data-f="${esc(n)}">${ic('folder')}<span class="fo-n">${esc(n)}</span>${ic('check', 'ck')}</button>`).join('')}
+    <label class="fl">새 폴더 만들고 넣기</label>
+    <input id="foNew" class="in" maxlength="30" placeholder="폴더 이름" autocomplete="off">
+    <button class="btn-primary block" data-act="create">만들고 넣기</button>`;
+}
+function folderAct(act, b) {
+  const m = cur(); if (!m) return;
+  let n;
+  if (act === 'pick') n = b.dataset.f;
+  else if (act === 'create') {
+    n = cleanName($('#foNew').value);
+    if (!n) { toast('폴더 이름을 입력해 주세요'); return; }
+    addFolder(n);
+  } else return;
+  setMemoFolder(m, n); closeSheet(); renderList();
+  toast(n ? '"' + n + '" 폴더에 넣었어요' : '폴더에서 뺐어요');
+}
+$('#btnFolder').addEventListener('click', () => openPanel('folder'));
+$('#btnFolderAdd').addEventListener('click', newFolderPrompt);
+$('#btnFoRename').addEventListener('click', renameFolder);
+$('#btnFoDel').addEventListener('click', deleteFolder);
+$('#folderNav').addEventListener('click', e => { const b = e.target.closest('[data-fo]'); if (b) setFilter('f:' + b.dataset.fo); });
 
 /* ================= wiring ================= */
 $('#btnNew').addEventListener('click', createMemo);
@@ -1599,7 +1719,7 @@ window.Sync = {
 
     api.pushMemo = m => {
       if (!uid) return; m.sy = true;
-      F.setDoc(memoRef(m.id), { title: m.title || '', html: m.lock ? '' : (m.html || ''), lock: m.lock || null, updated: m.updated, deleted: false }).catch(fail);
+      F.setDoc(memoRef(m.id), { title: m.title || '', html: m.lock ? '' : (m.html || ''), lock: m.lock || null, f: m.f || '', updated: m.updated, deleted: false }).catch(fail);
     };
     api.deleteMemo = id => {
       if (!uid) return;
